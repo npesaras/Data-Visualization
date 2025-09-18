@@ -1,18 +1,23 @@
 import { Client, Account, Databases } from 'appwrite';
 
-// Initialize the Appwrite client
-const client = new Client()
-    .setEndpoint(import.meta.env.VITE_APPWRITE_ENDPOINT) 
-    .setProject(import.meta.env.VITE_APPWRITE_PROJECT_ID); 
+const client = new Client();
 
-// Initialize Appwrite services
-export const account = new Account(client);
+client
+    .setEndpoint(import.meta.env.VITE_APPWRITE_ENDPOINT || 'https://cloud.appwrite.io/v1')
+    .setProject(import.meta.env.VITE_APPWRITE_PROJECT_ID);
+
 export const databases = new Databases(client);
+export const account = new Account(client);
+
+export { client };
+
+// Database and Collection IDs
+export const DATABASE_ID = import.meta.env.VITE_APPWRITE_DATABASE_ID;
+export const COLLECTION_ID = import.meta.env.VITE_APPWRITE_COLLECTION_ID;
 
 // Test connection function
 export const testConnection = async () => {
     try {
-        // Attempt to get account details - this will fail if connection is invalid
         const response = await account.get();
         return {
             status: 'success',
@@ -23,18 +28,16 @@ export const testConnection = async () => {
         return {
             status: 'error',
             message: 'Connection failed',
-            error: error.message
+            error: error instanceof Error ? error.message : 'Unknown error'
         };
     }
 };
 
-// Config object
 export const appwriteConfig = {
     client,
     account,
     databases,
     testConnection
 };
-
 
 export default appwriteConfig;
