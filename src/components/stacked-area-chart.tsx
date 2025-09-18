@@ -1,6 +1,6 @@
 import {
-  BarChart as RechartsBarChart,
-  Bar,
+  AreaChart as RechartsAreaChart,
+  Area,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -9,25 +9,48 @@ import {
   ResponsiveContainer
 } from "recharts";
 
-interface BarChartProps {
+interface StackedAreaChartProps {
   data: Record<string, string | number>[];
   index: string;
   categories: string[];
   colors: string[];
 }
 
-export function BarChart({ data, index, categories, colors }: BarChartProps) {
+export function StackedAreaChart({ data, index, categories, colors }: StackedAreaChartProps) {
   return (
-    <ResponsiveContainer width="100%" height="100%" minHeight={300}>
-      <RechartsBarChart
+    <ResponsiveContainer width="100%" height="100%" minHeight={400}>
+      <RechartsAreaChart
         data={data}
         margin={{
           top: 20,
           right: 30,
-          left: 40,
-          bottom: 20,
+          left: 50,
+          bottom: 30,
         }}
       >
+        <defs>
+          {categories.map((category, idx) => (
+            <linearGradient 
+              key={`stack-gradient-${category}`} 
+              id={`stack-gradient-${category}`} 
+              x1="0" 
+              y1="0" 
+              x2="0" 
+              y2="1"
+            >
+              <stop 
+                offset="5%" 
+                stopColor={colors[idx % colors.length]} 
+                stopOpacity={0.9}
+              />
+              <stop 
+                offset="95%" 
+                stopColor={colors[idx % colors.length]} 
+                stopOpacity={0.7}
+              />
+            </linearGradient>
+          ))}
+        </defs>
         <CartesianGrid 
           strokeDasharray="3 3" 
           stroke="hsl(var(--muted-foreground))" 
@@ -72,14 +95,17 @@ export function BarChart({ data, index, categories, colors }: BarChartProps) {
           }}
         />
         {categories.map((category, idx) => (
-          <Bar
+          <Area
             key={category}
+            type="monotone"
             dataKey={category}
-            fill={colors[idx % colors.length]}
-            radius={[2, 2, 0, 0]}
+            stackId="1"
+            stroke={colors[idx % colors.length]}
+            fill={`url(#stack-gradient-${category})`}
+            strokeWidth={1}
           />
         ))}
-      </RechartsBarChart>
+      </RechartsAreaChart>
     </ResponsiveContainer>
   );
 }

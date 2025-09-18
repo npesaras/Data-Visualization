@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { addEmigrant, getEmigrants, updateEmigrant, deleteEmigrant, type Emigrant } from './services/emigrantServices';
-import { testConnection } from './lib/appwrite';
+import { testConnection, testBasicConnection } from './lib/appwrite';
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
-import { Card } from "./components/ui/card";
+import { Label } from "./components/ui/label";
+import { Badge } from "./components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card";
 import {
   Table,
   TableBody,
@@ -13,6 +15,11 @@ import {
   TableRow,
 } from "./components/ui/table";
 import { BarChart } from "./components/bar-chart";
+import { CustomPieChart } from "./components/pie-chart";
+import { AreaChart } from "./components/area-chart";
+import { StackedAreaChart } from "./components/stacked-area-chart";
+import { StatsSummary } from "./components/stats-summary";
+import { ChartSelector } from "./components/chart-selector";
 
 interface FormData {
   year: string;
@@ -36,22 +43,121 @@ function App() {
     notReported: ""
   });
   const [loading, setLoading] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<string>("");
+  const [connectionStatus, setConnectionStatus] = useState<string>("Checking connection...");
+  const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [lastConnectionCheck, setLastConnectionCheck] = useState<Date>(new Date());
+  
+  // Connection monitoring ref to store interval ID
+  const connectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Test Appwrite connection on load
-  useEffect(() => {
-    testAppwriteConnection();
+  // Improved connection test function
+  const testAppwriteConnection = useCallback(async (showLogs = true) => {
+    try {
+      if (showLogs) console.log('Testing Appwrite connection...');
+      
+      // First try the main connection test
+      const result = await testConnection();
+      
+      if (result.status === 'success') {
+        setConnectionStatus(`Connected - ${result.message}`);
+        setIsConnected(true);
+        if (showLogs) console.log('✅ Appwrite connection successful:', result);
+        return true;
+      } else {
+        // If main test fails, try basic connection
+        if (showLogs) console.log('Primary test failed, trying basic connection...');
+        const basicResult = await testBasicConnection();
+        
+        if (basicResult.status === 'success' || basicResult.status === 'warning') {
+          setConnectionStatus(`Connected - ${basicResult.message}`);
+          setIsConnected(true);
+          if (showLogs) console.log('✅ Basic connection successful:', basicResult);
+          return true;
+        } else {
+          setConnectionStatus(`Error - ${basicResult.message}`);
+          setIsConnected(false);
+          if (showLogs) console.error('❌ All connection tests failed:', basicResult);
+          return false;
+        }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      setConnectionStatus(`Error - ${errorMessage}`);
+      setIsConnected(false);
+      if (showLogs) console.error('❌ Connection test exception:', error);
+      return false;
+    } finally {
+      setLastConnectionCheck(new Date());
+    }
   }, []);
 
-  const testAppwriteConnection = async () => {
-    try {
-      const result = await testConnection();
-      setConnectionStatus(`Connection: ${result.status} - ${result.message}`);
-      console.log('Appwrite connection test:', result);
-    } catch (error) {
-      setConnectionStatus('Connection: Error - Unable to connect');
-      console.error('Connection test failed:', error);
+  // Start continuous connection monitoring
+  const startConnectionMonitoring = useCallback(() => {
+    // Clear any existing interval
+    if (connectionIntervalRef.current) {
+      clearInterval(connectionIntervalRef.current);
     }
+
+    // Initial connection test
+    testAppwriteConnection(true);
+
+    // Set up periodic connection checks (every 30 seconds)
+    connectionIntervalRef.current = setInterval(() => {
+      testAppwriteConnection(false); // Silent checks after initial
+    }, 30000); // 30 seconds
+
+    console.log('🔄 Connection monitoring started (checks every 30 seconds)');
+  }, [testAppwriteConnection]);
+
+  // Stop connection monitoring
+  const stopConnectionMonitoring = useCallback(() => {
+    if (connectionIntervalRef.current) {
+      clearInterval(connectionIntervalRef.current);
+      connectionIntervalRef.current = null;
+      console.log('⏹️ Connection monitoring stopped');
+    }
+  }, []);
+
+  // Manual connection refresh
+  const refreshConnection = useCallback(async () => {
+    setConnectionStatus("Refreshing connection...");
+    await testAppwriteConnection(true);
+  }, [testAppwriteConnection]);
+
+  // Test Appwrite connection on load and start monitoring
+  useEffect(() => {
+    startConnectionMonitoring();
+    fetchData();
+    // Add sample data immediately for demo purposes
+    addSampleData();
+
+    // Cleanup on unmount
+    return () => {
+      stopConnectionMonitoring();
+    };
+  }, [startConnectionMonitoring, stopConnectionMonitoring]);
+
+  // Remove the second useEffect that was causing timing issues
+
+  const addSampleData = () => {
+    // Sample data for demonstration purposes
+    const sampleData = [
+      { year: 2020, single: 15000, married: 25000, widower: 2000, separated: 1500, divorced: 3000, notReported: 1000 },
+      { year: 2021, single: 16500, married: 27000, widower: 2200, separated: 1600, divorced: 3200, notReported: 1100 },
+      { year: 2022, single: 17200, married: 26800, widower: 2100, separated: 1700, divorced: 3300, notReported: 1200 },
+      { year: 2023, single: 18000, married: 28500, widower: 2300, separated: 1800, divorced: 3500, notReported: 1300 }
+    ];
+    
+    setEmigrants(sampleData.map((data, index) => ({
+      ...data,
+      $id: `sample-${index}`,
+      $createdAt: new Date().toISOString(),
+      $updatedAt: new Date().toISOString(),
+      $permissions: [],
+      $databaseId: 'sample',
+      $collectionId: 'sample',
+      $sequence: index
+    })));
   };
 
   const fetchData = async () => {
@@ -78,16 +184,17 @@ function App() {
   };
 
   const clearForm = () => {
-    setForm({ 
-      year: "", 
-      single: "", 
-      married: "", 
-      widower: "", 
-      separated: "", 
-      divorced: "", 
-      notReported: "" 
+    setForm({
+      year: "",
+      single: "",
+      married: "",
+      widower: "",
+      separated: "",
+      divorced: "",
+      notReported: ""
     });
   };
+
 
   const handleAdd = async () => {
     if (!form.year) {
@@ -150,107 +257,341 @@ function App() {
     }
   };
 
-  // Prepare data for shadcn chart
+  // Prepare data for charts
   const chartData = emigrants.map(e => ({
-    name: e.year.toString(),
+    year: e.year.toString(),
     Single: e.single,
     Married: e.married,
     Widower: e.widower,
     Separated: e.separated,
     Divorced: e.divorced,
     "Not Reported": e.notReported,
+    Total: e.single + e.married + e.widower + e.separated + e.divorced + e.notReported,
   }));
 
-  return (
-    <div className="p-8 max-w-7xl mx-auto">
-      <h1 className="text-3xl font-bold mb-4">Filipino Emigrants Data</h1>
-      <p className="text-sm text-gray-600 mb-8">{connectionStatus}</p>
+  // Prepare yearly totals data
+  const yearlyTotalsData = emigrants.map(e => ({
+    year: e.year.toString(),
+    "Total Emigrants": e.single + e.married + e.widower + e.separated + e.divorced + e.notReported,
+  }));
 
-      <Card className="p-6 mb-8">
-        <div className="grid grid-cols-4 gap-4">
-          {Object.keys(form).map(key => (
-            <Input
-              key={key}
-              name={key}
-              placeholder={key.charAt(0).toUpperCase() + key.slice(1)}
-              value={form[key as keyof FormData]}
-              onChange={handleChange}
-              type="number"
+  // Calculate summary statistics
+  const totalEmigrants = emigrants.reduce((total, e) => 
+    total + e.single + e.married + e.widower + e.separated + e.divorced + e.notReported, 0
+  );
+  
+  const totalByStatus = emigrants.reduce((acc, e) => ({
+    single: acc.single + e.single,
+    married: acc.married + e.married,
+    widower: acc.widower + e.widower,
+    separated: acc.separated + e.separated,
+    divorced: acc.divorced + e.divorced,
+    notReported: acc.notReported + e.notReported,
+  }), { single: 0, married: 0, widower: 0, separated: 0, divorced: 0, notReported: 0 });
+
+  // Prepare pie chart data for marital status breakdown
+  const pieChartData = [
+    { category: "Single", count: totalByStatus.single, fill: "#3b82f6" },
+    { category: "Married", count: totalByStatus.married, fill: "#10b981" },
+    { category: "Widower", count: totalByStatus.widower, fill: "#f59e0b" },
+    { category: "Separated", count: totalByStatus.separated, fill: "#8b5cf6" },
+    { category: "Divorced", count: totalByStatus.divorced, fill: "#ef4444" },
+    { category: "Not Reported", count: totalByStatus.notReported, fill: "#6b7280" },
+  ].filter(item => item.count > 0); // Only show categories with data
+
+  const pieChartConfig = {
+    count: {
+      label: "Count",
+    },
+    single: {
+      label: "Single",
+      color: "var(--chart-1)",
+    },
+    married: {
+      label: "Married",
+      color: "var(--chart-2)",
+    },
+    widower: {
+      label: "Widower",
+      color: "var(--chart-3)",
+    },
+    separated: {
+      label: "Separated",
+      color: "var(--chart-4)",
+    },
+    divorced: {
+      label: "Divorced",
+      color: "var(--chart-5)",
+    },
+    "not-reported": {
+      label: "Not Reported",
+      color: "var(--chart-6)",
+    },
+  };
+
+  return (
+    <div className="p-6 max-w-7xl mx-auto space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-foreground">Filipino Emigrants Data</h1>
+          <p className="text-muted-foreground mt-1">Manage and visualize emigrant statistics</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Badge 
+              variant={isConnected ? 'default' : 'destructive'}
+              className="relative"
+            >
+              <span className={`inline-block w-2 h-2 rounded-full mr-2 ${isConnected ? 'bg-green-400' : 'bg-red-400'}`} />
+              {connectionStatus}
+            </Badge>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={refreshConnection}
               disabled={loading}
-            />
-          ))}
-          <div className="col-span-4 flex gap-2">
-            <Button onClick={handleAdd} className="flex-1" disabled={loading}>
-              {loading ? "Adding..." : "Add Record"}
-            </Button>
-            <Button onClick={clearForm} variant="outline" disabled={loading}>
-              Clear
+              title="Refresh connection status"
+              className="px-3"
+            >
+              🔄
             </Button>
           </div>
+          <div className="text-xs text-muted-foreground hidden sm:block">
+            Last check: {lastConnectionCheck.toLocaleTimeString()}
+          </div>
         </div>
-      </Card>
+      </div>
 
-      <Card className="mb-8">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Year</TableHead>
-              <TableHead>Single</TableHead>
-              <TableHead>Married</TableHead>
-              <TableHead>Widower</TableHead>
-              <TableHead>Separated</TableHead>
-              <TableHead>Divorced</TableHead>
-              <TableHead>Not Reported</TableHead>
-              <TableHead>Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {emigrants.map(e => (
-              <TableRow key={e.$id}>
-                <TableCell>{e.year}</TableCell>
-                <TableCell>{e.single}</TableCell>
-                <TableCell>{e.married}</TableCell>
-                <TableCell>{e.widower}</TableCell>
-                <TableCell>{e.separated}</TableCell>
-                <TableCell>{e.divorced}</TableCell>
-                <TableCell>{e.notReported}</TableCell>
-                <TableCell>
-                  <div className="flex gap-2">
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      onClick={() => handleUpdate(e.$id)}
-                      disabled={loading}
-                    >
-                      Update
-                    </Button>
-                    <Button 
-                      variant="destructive" 
-                      size="sm" 
-                      onClick={() => handleDelete(e.$id)}
-                      disabled={loading}
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
+      <Card>
+        <CardHeader>
+          <CardTitle>Add New Emigrant Record</CardTitle>
+          <CardDescription>
+            Enter emigrant data by marital status for a specific year
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {Object.keys(form).map(key => (
+              <div key={key} className="space-y-2">
+                <Label htmlFor={key} className="text-sm font-medium">
+                  {key.charAt(0).toUpperCase() + key.slice(1).replace(/([A-Z])/g, ' $1')}
+                </Label>
+                <Input
+                  id={key}
+                  name={key}
+                  placeholder={`Enter ${key}`}
+                  value={form[key as keyof FormData]}
+                  onChange={handleChange}
+                  type="number"
+                  disabled={loading}
+                  className="w-full"
+                />
+              </div>
             ))}
-          </TableBody>
-        </Table>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3 mt-6">
+            <Button onClick={handleAdd} className="flex-1 min-w-0" disabled={loading}>
+              {loading ? "Adding..." : "Add Record"}
+            </Button>
+            <Button onClick={clearForm} variant="outline" className="sm:w-auto" disabled={loading}>
+              Clear Form
+            </Button>
+          </div>
+        </CardContent>
       </Card>
 
-      <Card className="p-6">
-        <h2 className="text-2xl font-bold mb-4">Emigrants by Category</h2>
-        <div className="h-[400px]">
-          <BarChart
-            data={chartData}
-            categories={["Single", "Married", "Widower", "Separated", "Divorced", "Not Reported"]}
-            index="name"
-            colors={["blue", "green", "yellow", "purple", "pink", "gray"]}
-          />
-        </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Emigrant Records</CardTitle>
+          <CardDescription>
+            View and manage all emigrant data records
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Year</TableHead>
+                <TableHead>Single</TableHead>
+                <TableHead>Married</TableHead>
+                <TableHead>Widower</TableHead>
+                <TableHead>Separated</TableHead>
+                <TableHead>Divorced</TableHead>
+                <TableHead>Not Reported</TableHead>
+                <TableHead>Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {emigrants.map(e => (
+                <TableRow key={e.$id}>
+                  <TableCell className="font-medium">{e.year}</TableCell>
+                  <TableCell>{e.single}</TableCell>
+                  <TableCell>{e.married}</TableCell>
+                  <TableCell>{e.widower}</TableCell>
+                  <TableCell>{e.separated}</TableCell>
+                  <TableCell>{e.divorced}</TableCell>
+                  <TableCell>{e.notReported}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={() => handleUpdate(e.$id)}
+                        disabled={loading}
+                        className="min-w-0"
+                      >
+                        Update
+                      </Button>
+                      <Button 
+                        variant="destructive" 
+                        size="sm" 
+                        onClick={() => handleDelete(e.$id)}
+                        disabled={loading}
+                        className="min-w-0"
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
       </Card>
+
+      {/* Summary Statistics */}
+      <StatsSummary 
+        data={{
+          totalEmigrants,
+          totalByStatus,
+          yearlyData: yearlyTotalsData.map(item => ({
+            year: parseInt(item.year),
+            total: item["Total Emigrants"]
+          }))
+        }}
+      />
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Total Emigrants by Year</CardTitle>
+            <CardDescription>
+              Total number of emigrants per year across all marital statuses
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-6">
+            <div className="h-[400px] w-full">
+              <BarChart
+                data={yearlyTotalsData}
+                categories={["Total Emigrants"]}
+                index="year"
+                colors={["#3b82f6"]}
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Emigrants by Marital Status</CardTitle>
+            <CardDescription>
+              Breakdown of emigrants by marital status across all recorded years
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-6">
+            <div className="h-[400px] w-full">
+              <BarChart
+                data={chartData}
+                categories={["Single", "Married", "Widower", "Separated", "Divorced", "Not Reported"]}
+                index="year"
+                colors={["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#6b7280"]} 
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Marital Status Distribution</CardTitle>
+            <CardDescription>
+              Overall distribution of emigrants by marital status
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-6">
+            <div className="h-[400px] w-full flex items-center justify-center">
+              {pieChartData.length > 0 ? (
+                <CustomPieChart
+                  data={pieChartData}
+                  title=""
+                  description=""
+                  dataKey="count"
+                  nameKey="category"
+                  config={pieChartConfig}
+                />
+              ) : (
+                <div className="text-center text-muted-foreground">
+                  <p className="text-lg font-medium">No data available</p>
+                  <p className="text-sm">Add some emigrant records to see the distribution</p>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Additional Charts Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <ChartSelector
+          data={chartData}
+          categories={["Single", "Married", "Widower", "Separated", "Divorced", "Not Reported"]}
+          index="year"
+          colors={["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#6b7280"]}
+          title="Interactive Emigration Analysis"
+          description="Switch between different chart types to analyze emigrant trends"
+        />
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Cumulative Emigration (Area Chart)</CardTitle>
+            <CardDescription>
+              Area visualization showing emigration patterns by marital status
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-6">
+            <div className="h-[400px] w-full">
+              <AreaChart
+                data={chartData}
+                categories={["Single", "Married", "Widower", "Separated", "Divorced", "Not Reported"]}
+                index="year"
+                colors={["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#6b7280"]}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Stacked Chart Section */}
+      <div className="grid grid-cols-1 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Stacked Emigration Analysis</CardTitle>
+            <CardDescription>
+              Comprehensive view showing the composition of emigrants by marital status over time
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-6">
+            <div className="h-[500px] w-full">
+              <StackedAreaChart
+                data={chartData}
+                categories={["Single", "Married", "Widower", "Separated", "Divorced", "Not Reported"]}
+                index="year"
+                colors={["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#6b7280"]}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

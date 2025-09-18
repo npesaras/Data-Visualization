@@ -1,6 +1,6 @@
 import {
-  BarChart as RechartsBarChart,
-  Bar,
+  LineChart as RechartsLineChart,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -9,17 +9,17 @@ import {
   ResponsiveContainer
 } from "recharts";
 
-interface BarChartProps {
+interface LineChartProps {
   data: Record<string, string | number>[];
   index: string;
   categories: string[];
   colors: string[];
 }
 
-export function BarChart({ data, index, categories, colors }: BarChartProps) {
+export function LineChart({ data, index, categories, colors }: LineChartProps) {
   return (
     <ResponsiveContainer width="100%" height="100%" minHeight={300}>
-      <RechartsBarChart
+      <RechartsLineChart
         data={data}
         margin={{
           top: 20,
@@ -72,14 +72,27 @@ export function BarChart({ data, index, categories, colors }: BarChartProps) {
           }}
         />
         {categories.map((category, idx) => (
-          <Bar
+          <Line
             key={category}
+            type="monotone"
             dataKey={category}
-            fill={colors[idx % colors.length]}
-            radius={[2, 2, 0, 0]}
+            stroke={colors[idx % colors.length]}
+            strokeWidth={2.5}
+            dot={{ 
+              r: 3, 
+              fill: colors[idx % colors.length],
+              strokeWidth: 0
+            }}
+            activeDot={{ 
+              r: 5, 
+              fill: colors[idx % colors.length],
+              stroke: '#fff',
+              strokeWidth: 2
+            }}
+            connectNulls={false}
           />
         ))}
-      </RechartsBarChart>
+      </RechartsLineChart>
     </ResponsiveContainer>
   );
 }

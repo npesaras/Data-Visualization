@@ -1,6 +1,6 @@
 import {
-  BarChart as RechartsBarChart,
-  Bar,
+  AreaChart as RechartsAreaChart,
+  Area,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -9,17 +9,17 @@ import {
   ResponsiveContainer
 } from "recharts";
 
-interface BarChartProps {
+interface AreaChartProps {
   data: Record<string, string | number>[];
   index: string;
   categories: string[];
   colors: string[];
 }
 
-export function BarChart({ data, index, categories, colors }: BarChartProps) {
+export function AreaChart({ data, index, categories, colors }: AreaChartProps) {
   return (
     <ResponsiveContainer width="100%" height="100%" minHeight={300}>
-      <RechartsBarChart
+      <RechartsAreaChart
         data={data}
         margin={{
           top: 20,
@@ -28,6 +28,29 @@ export function BarChart({ data, index, categories, colors }: BarChartProps) {
           bottom: 20,
         }}
       >
+        <defs>
+          {categories.map((category, idx) => (
+            <linearGradient 
+              key={`gradient-${category}`} 
+              id={`gradient-${category}`} 
+              x1="0" 
+              y1="0" 
+              x2="0" 
+              y2="1"
+            >
+              <stop 
+                offset="5%" 
+                stopColor={colors[idx % colors.length]} 
+                stopOpacity={0.8}
+              />
+              <stop 
+                offset="95%" 
+                stopColor={colors[idx % colors.length]} 
+                stopOpacity={0.1}
+              />
+            </linearGradient>
+          ))}
+        </defs>
         <CartesianGrid 
           strokeDasharray="3 3" 
           stroke="hsl(var(--muted-foreground))" 
@@ -72,14 +95,16 @@ export function BarChart({ data, index, categories, colors }: BarChartProps) {
           }}
         />
         {categories.map((category, idx) => (
-          <Bar
+          <Area
             key={category}
+            type="monotone"
             dataKey={category}
-            fill={colors[idx % colors.length]}
-            radius={[2, 2, 0, 0]}
+            stroke={colors[idx % colors.length]}
+            fill={`url(#gradient-${category})`}
+            strokeWidth={2}
           />
         ))}
-      </RechartsBarChart>
+      </RechartsAreaChart>
     </ResponsiveContainer>
   );
 }
