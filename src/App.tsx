@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { addEmigrant, getEmigrants, updateEmigrant, deleteEmigrant, type Emigrant } from './services/emigrantServices';
 import { testConnection, testBasicConnection } from './lib/appwrite';
+import { importCSVToAppwrite, validateCSVFile, downloadSampleCSV, type ImportResult } from './services/importCSV';
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { Label } from "./components/ui/label";
@@ -46,6 +47,11 @@ function App() {
   const [connectionStatus, setConnectionStatus] = useState<string>("Checking connection...");
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [lastConnectionCheck, setLastConnectionCheck] = useState<Date>(new Date());
+  
+  // CSV Import states
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvImporting, setCsvImporting] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
   
   // Connection monitoring ref to store interval ID
   const connectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -123,6 +129,73 @@ function App() {
     setConnectionStatus("Refreshing connection...");
     await testAppwriteConnection(true);
   }, [testAppwriteConnection]);
+
+  // CSV Import handlers
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setCsvFile(file);
+      setImportResult(null);
+    }
+  };
+
+  const handleImportCSV = async () => {
+    if (!csvFile) {
+      alert('Please select a CSV file first');
+      return;
+    }
+
+    try {
+      setCsvImporting(true);
+      setImportResult(null);
+      
+      console.log('Starting CSV import for file:', csvFile.name);
+      
+      // Validate file first
+      const validation = await validateCSVFile(csvFile);
+      if (!validation.isValid) {
+        setImportResult({
+          success: false,
+          message: `Invalid CSV file: ${validation.errors.join(', ')}`,
+          importedCount: 0,
+          skippedCount: 0,
+          errors: validation.errors
+        });
+        return;
+      }
+
+      // Import the CSV
+      const result = await importCSVToAppwrite(csvFile);
+      setImportResult(result);
+      
+      if (result.success) {
+        // Refresh the emigrants list
+        await fetchData();
+        // Clear the form and file input
+        clearForm();
+        setCsvFile(null);
+        // Reset file input
+        const fileInput = document.getElementById('csv-file-input') as HTMLInputElement;
+        if (fileInput) fileInput.value = '';
+      }
+      
+    } catch (error) {
+      console.error('CSV import error:', error);
+      setImportResult({
+        success: false,
+        message: error instanceof Error ? error.message : 'Unknown error occurred',
+        importedCount: 0,
+        skippedCount: 0,
+        errors: [error instanceof Error ? error.message : 'Unknown error']
+      });
+    } finally {
+      setCsvImporting(false);
+    }
+  };
+
+  const handleDownloadSample = () => {
+    downloadSampleCSV();
+  };
 
   // Test Appwrite connection on load and start monitoring
   useEffect(() => {
@@ -396,6 +469,96 @@ function App() {
             <Button onClick={clearForm} variant="outline" className="sm:w-auto" disabled={loading}>
               Clear Form
             </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* CSV Import Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Import from CSV</CardTitle>
+          <CardDescription>
+            Upload a CSV file with emigrant data. The file should have columns: year, single, married, widower, separated, divorced, notReported
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row gap-4">
+              <div className="flex-1">
+                <Label htmlFor="csv-file-input" className="text-sm font-medium">
+                  Select CSV File
+                </Label>
+                <Input
+                  id="csv-file-input"
+                  type="file"
+                  accept=".csv"
+                  onChange={handleFileChange}
+                  disabled={csvImporting || loading}
+                  className="mt-1"
+                />
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+                <Button
+                  onClick={handleImportCSV}
+                  disabled={!csvFile || csvImporting || loading}
+                  className="sm:w-auto"
+                >
+                  {csvImporting ? "Importing..." : "Import CSV"}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleDownloadSample}
+                  disabled={csvImporting || loading}
+                  className="sm:w-auto"
+                >
+                  Download Sample
+                </Button>
+              </div>
+            </div>
+
+            {/* Import Result Display */}
+            {importResult && (
+              <div className={`p-4 rounded-lg border ${
+                importResult.success 
+                  ? 'bg-green-50 border-green-200 text-green-800' 
+                  : 'bg-red-50 border-red-200 text-red-800'
+              }`}>
+                <div className="flex items-start gap-2">
+                  <span className="text-lg">
+                    {importResult.success ? '✅' : '❌'}
+                  </span>
+                  <div className="flex-1">
+                    <p className="font-medium">{importResult.message}</p>
+                    {importResult.importedCount > 0 && (
+                      <p className="text-sm mt-1">
+                        Successfully imported {importResult.importedCount} records
+                        {importResult.skippedCount > 0 && `, skipped ${importResult.skippedCount} rows`}
+                      </p>
+                    )}
+                    {importResult.errors.length > 0 && (
+                      <div className="mt-2">
+                        <p className="text-sm font-medium">Errors:</p>
+                        <ul className="text-xs mt-1 list-disc list-inside max-h-32 overflow-y-auto">
+                          {importResult.errors.slice(0, 10).map((error, index) => (
+                            <li key={index}>{error}</li>
+                          ))}
+                          {importResult.errors.length > 10 && (
+                            <li>... and {importResult.errors.length - 10} more errors</li>
+                          )}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {csvFile && (
+              <div className="text-sm text-muted-foreground">
+                Selected file: <span className="font-medium">{csvFile.name}</span> 
+                ({(csvFile.size / 1024).toFixed(1)} KB)
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
